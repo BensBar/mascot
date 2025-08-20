@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mascot Race</title>
+  <style>
+    :root {
+      --bg: #0b0b0d;
+      --panel: #15161a;
+      --accent: #e53935;
+      --text: #e9eef3;
+      --muted: #9aa5b1;
+      --win: #2ecc71;
+    }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    .app { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
+
+    /* Top bar */
+    header { display:flex; gap:12px; align-items:center; padding:12px 16px; background: linear-gradient(180deg, #0f1014 0%, #0b0b0d 100%); border-bottom: 1px solid #24262c; position: sticky; top: 0; z-index: 5; }
+    .title { font-weight: 700; letter-spacing: 0.3px; }
+    .spacer { flex:1; }
+    .btn { appearance:none; border:none; background:#20222a; color:var(--text); padding:10px 14px; border-radius:12px; cursor:pointer; font-weight:600; transition: transform .06s ease, background .2s ease, opacity .2s ease; }
+    .btn:hover { background:#262933; }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary { background: var(--accent); }
+    .btn.primary:hover { filter: brightness(1.05); }
+    .btn.ghost { background: transparent; border: 1px solid #333740; }
+
+    /* Controls */
+    .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .group { display:flex; gap:6px; background:#121319; padding:8px; border-radius:12px; border: 1px solid #24262c; }
+    .seg { display:flex; gap:6px; }
+    .seg .btn { padding:8px 12px; }
+    .btn.toggled { outline: 2px solid var(--accent); background:#2a2e3a; }
+
+    /* Track area */
+    .stage { position: relative; overflow:hidden; }
+    canvas { width: 100%; height: 100%; background: #0c0e12; display:block; }
+
+    /* Bottom bar */
+    footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 16px; border-top: 1px solid #24262c; background: #0b0b0d; }
+    .hint { color: var(--muted); font-size: 13px; }
+
+    /* Checkbox chips */
+    .chip { display:flex; align-items:center; gap:6px; padding:6px 10px; background:#1a1c23; border-radius:999px; border:1px solid #2a2d37; }
+    .chip input { accent-color: var(--accent); }
+
+    /* Winner banner */
+    .winner { position:absolute; inset:auto 12px 12px auto; background:#121319cc; border:1px solid #30323a; border-radius:12px; padding:10px 12px; font-weight:700; backdrop-filter: blur(6px); box-shadow: 0 8px 24px #0008; }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="title">🏁 Mascot Race</div>
+    <div class="controls">
+      <div class="group" id="durationGroup" aria-label="Race Length">
+        <span class="hint" style="margin-right:6px">Length</span>
+        <div class="seg">
+          <button class="btn" data-duration="30">30s</button>
+          <button class="btn toggled" data-duration="45">45s</button>
+          <button class="btn" data-duration="60">60s</button>
+        </div>
+      </div>
+      <div class="group" id="racersGroup" aria-label="Racers"></div>
+      <div class="group" id="optionsGroup">
+        <label class="chip"><input type="checkbox" id="rubberband" checked/> <span>Rubber-banding</span></label>
+        <label class="chip"><input type="checkbox" id="photoFinish" checked/> <span>Photo finish</span></label>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <button class="btn ghost" id="fsBtn" title="Fullscreen">⤢ Fullscreen</button>
+    <button class="btn primary" id="startBtn">Start Race</button>
+    <button class="btn" id="resetBtn">Reset</button>
+  </header>
+
+  <main class="stage">
+    <canvas id="track"></canvas>
+    <div id="winner" class="winner" style="display:none"></div>
+  </main>
+
+  <footer>
+    <div class="hint">Tip: Mirror your iPhone/iPad via AirPlay. Use the QR-less mode here—just pick racers verbally, then press <b>Start</b>.</div>
+    <div class="hint">Repo-ready: single file. Drop assets in <code>/assets</code> and edit <code>mascots</code> config below.</div>
+  </footer>
+</div>
+
+<script>
+  // --- CONFIG ---
+  // Provide transparent PNG or SVG paths. If an image fails to load, we render a pill with the mascot name.
+  const mascots = [
+    { id:"blooper",  name:"Blooper",   jersey:"ATL", color:"#e91e63", img:"assets/blooper.png" },
+    { id:"uga",      name:"Uga",       jersey:"1",   color:"#d32f2f", img:"assets/uga.png" },
+    { id:"hairyhawk",name:"Hairy Hawk",jersey:"00",  color:"#f44336", img:"assets/hairyhawk.png" },
+    { id:"freddy",   name:"Freddie",   jersey:"00",  color:"#ff7043", img:"assets/freddie.png" }
+  ];
+
+  // Track visuals
+  const laneHeight = 120;          // logical lane height; scaled by device pixel ratio (dpr)
+  const sidePadding = 120;         // left padding for start area
+  const finishPadding = 80;        // right padding before finish line
+
+  // Runtime state
+  let duration = 45;               // seconds
+  let selectedIds = new Set(mascots.map(m => m.id));
+  let dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+  let canvas, ctx, width, height, lanes, finishX;
+  let racers = [];                 // populated on start
+  let startedAt = 0;               // ms
+  let running = false;
+  let winnerShown = false;
+
+  function $(q){ return document.querySelector(q); }
+  function el(tag, attrs = {}, children = []){ const e = document.createElement(tag); for (const [k,v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k === 'text') e.textContent = v; else e.setAttribute(k, v);} children.forEach(c => e.appendChild(c)); return e; }
+
+  function initUI(){
+    // Duration toggles
+    const dur = [30,45,60];
+    const group = document.getElementById('durationGroup');
+    group.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
+      group.querySelectorAll('button').forEach(b => b.classList.remove('toggled'));
+      btn.classList.add('toggled');
+      duration = parseInt(btn.dataset.duration, 10);
+    }));
+
+    // Racer chips
+    const rg = document.getElementById('racersGroup');
+    mascots.forEach(m => {
+      const id = `chk_${m.id}`;
+      const chip = el('label', { class:'chip' });
+      const input = el('input', { type:'checkbox', id, checked:true });
+      input.addEventListener('change', () => {
+        if (input.checked) selectedIds.add(m.id); else selectedIds.delete(m.id);
+      });
+      chip.appendChild(input);
+      chip.appendChild(el('span',{ text:m.name }));
+      rg.appendChild(chip);
+    });
+
+    $('#startBtn').addEventListener('click', startRace);
+    $('#resetBtn').addEventListener('click', resetRace);
+    $('#fsBtn').addEventListener('click', () => {
+      const root = document.documentElement;
+      if (!document.fullscreenElement) root.requestFullscreen?.(); else document.exitFullscreen?.();
+    });
+  }
+
+  function setupCanvas(){
+    canvas = $('#track');
+    ctx = canvas.getContext('2d');
+    resize();
+    window.addEventListener('resize', resize);
+    drawIdle();
+  }
+
+  function resize(){
+    const rect = canvas.getBoundingClientRect();
+    width  = Math.floor(rect.width * dpr);
+    lanes  = Math.max(2, selectedIds.size || mascots.length);
+    height = Math.floor(Math.max(lanes * laneHeight + 160, 420) * dpr);
+    canvas.width = width; canvas.height = height;
+    finishX = width - finishPadding * dpr;
+    if (!running) drawIdle();
+  }
+
+  function drawTrack(){
+    // background
+    ctx.fillStyle = '#0b0c10';
+    ctx.fillRect(0,0,width,height);
+
+    // grass
+    ctx.fillStyle = '#0d421b';
+    ctx.fillRect(0, 0, width, 120 * dpr);
+    ctx.fillRect(0, height - 120 * dpr, width, 120 * dpr);
+
+    // lanes
+    const top = 140 * dpr; const usableH = height - 280 * dpr; const per = usableH / lanes;
+    for (let i=0;i<lanes;i++){
+      const y = top + i*per;
+      ctx.fillStyle = i % 2 ? '#18202a' : '#141b24';
+      ctx.fillRect(0, y, width, per);
+      // lane lines
+      ctx.strokeStyle = '#2a313d'; ctx.lineWidth = 2 * dpr;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+    }
+    // bottom line
+    ctx.strokeStyle = '#2a313d'; ctx.beginPath(); ctx.moveTo(0, top + lanes*per); ctx.lineTo(width, top + lanes*per); ctx.stroke();
+
+    // start & finish
+    const startX = sidePadding * dpr;
+    ctx.strokeStyle = '#607d8b'; ctx.lineWidth = 4 * dpr;
+    ctx.beginPath(); ctx.moveTo(startX, top); ctx.lineTo(startX, top + lanes*per); ctx.stroke();
+
+    // chequered finish
+    const cell = 12 * dpr; const finishTop = top; const finishH = lanes*per;
+    for (let y=0; y<finishH; y+=cell){
+      for (let x=0; x<cell*2; x+=cell){
+        const odd = ((x/cell) + (y/cell)) % 2 === 1;
+        ctx.fillStyle = odd ? '#eeeeee' : '#333333';
+        ctx.fillRect(finishX + x, finishTop + y, cell, cell);
+      }
+    }
+
+    // labels
+    ctx.fillStyle = '#b0bec5'; ctx.font = `${14*dpr}px system-ui, -apple-system, sans-serif`;
+    ctx.fillText('START', startX - 64*dpr, top - 10*dpr);
+    ctx.fillText('FINISH', finishX - 20*dpr, top - 10*dpr);
+  }
+
+  // Racer object
+  class Racer {
+    constructor(m, laneIndex){
+      this.m = m;
+      this.laneIndex = laneIndex;
+      this.progress = 0;   // 0..1 across the track length
+      this.w = 80 * dpr;   // sprite width for layout
+      this.h = 80 * dpr;
+      this.img = new Image();
+      this.img.src = m.img;
+      this.img.onerror = () => { this.img = null; }
+      // Base pace: aim at reaching ~1.0 near duration with slight variance
+      this.base = 1 / duration * (0.98 + Math.random()*0.04);
+      // personality jitter
+      this.jitterAmp = 0.20 + Math.random()*0.15; // magnitude of wobbles
+      this.jitterFreq = 1.2 + Math.random()*1.2;  // cycles per second
+      this.finished = false; this.finishTime = null;
+    }
+    step(dt, leaders){
+      if (this.finished) return;
+      // rubber-banding: apply small bonus to those behind, small malus to clear leader
+      let band = 1.0;
+      if ($('#rubberband').checked && leaders && leaders.length){
+        const maxProg = Math.max(...leaders);
+        const gap = (maxProg - this.progress); // 0 for leader, positive for behind
+        band += Math.min(0.18, Math.max(-0.12, gap*0.35));
+      }
+      // periodic wobble so lanes swap leads
+      const t = (performance.now() - startedAt)/1000;
+      const wobble = 1 + this.jitterAmp * Math.sin((t + this.laneIndex)*this.jitterFreq*2*Math.PI);
+      const speed = this.base * wobble * band;
+      this.progress += speed * dt;
+    }
+    draw(){
+      const top = 140 * dpr; const usableH = height - 280 * dpr; const per = usableH / lanes;
+      const yMid = top + this.laneIndex*per + per/2;
+      const startX = sidePadding * dpr;
+      const x = startX + (finishX - startX - this.w) * Math.min(this.progress, 1);
+      const y = yMid - this.h/2;
+
+      if (this.img && this.img.complete){
+        ctx.drawImage(this.img, x, y, this.w, this.h);
+      } else {
+        // Fallback pill with name
+        ctx.fillStyle = this.m.color; roundRect(ctx, x, y, this.w, this.h, 16*dpr); ctx.fill();
+        ctx.fillStyle = '#101217'; roundRect(ctx, x+6*dpr, y+6*dpr, this.w-12*dpr, this.h-12*dpr, 12*dpr); ctx.fill();
+        ctx.fillStyle = '#ffffff'; ctx.font = `${16*dpr}px system-ui`; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(this.m.name, x + this.w/2, y + this.h/2);
+      }
+
+      // jersey bubble
+      ctx.fillStyle = '#000a'; roundRect(ctx, x + this.w*0.65, y + this.h*0.05, 28*dpr, 22*dpr, 6*dpr); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = `${12*dpr}px system-ui`; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(this.m.jersey, x + this.w*0.65 + 14*dpr, y + this.h*0.05 + 11*dpr);
+
+      // shadow
+      ctx.fillStyle = '#0007'; ctx.beginPath(); ctx.ellipse(x + this.w/2, y + this.h*0.95, this.w*0.45, this.h*0.10, 0, 0, Math.PI*2); ctx.fill();
+    }
+  }
+
+  function roundRect(ctx, x, y, w, h, r){
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y, x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x, y+h, r);
+    ctx.arcTo(x, y+h, x, y, r);
+    ctx.arcTo(x, y, x+w, y, r);
+    ctx.closePath();
+  }
+
+  function drawIdle(){
+    drawTrack();
+    // Draw placeholders for currently selected racers
+    const sel = mascots.filter(m => selectedIds.has(m.id));
+    lanes = Math.max(2, sel.length || 4);
+    const racersTemp = sel.map((m,i)=> new Racer(m,i));
+    racersTemp.forEach(r => r.draw());
+  }
+
+  function startRace(){
+    if (running) return;
+    const sel = mascots.filter(m => selectedIds.has(m.id));
+    if (sel.length < 2){ alert('Select at least two mascots to race.'); return; }
+
+    racers = sel.map((m,i)=> new Racer(m,i));
+    lanes = racers.length; resize(); // recompute canvas height based on lanes
+    startedAt = performance.now();
+    running = true; winnerShown = false; $('#winner').style.display = 'none';
+    requestAnimationFrame(tick);
+  }
+
+  function resetRace(){ running = false; racers = []; drawIdle(); $('#winner').style.display='none'; }
+
+  function tick(){
+    if (!running) return;
+    drawTrack();
+
+    // Timing
+    const now = performance.now();
+    const elapsed = (now - startedAt) / 1000; // seconds
+    const dt = 1/60; // integrate at fixed step for stability
+
+    const leaders = racers.map(r=>r.progress);
+    for (let i=0;i<Math.ceil(60*dt);i++){
+      racers.forEach(r => r.step(dt, leaders));
+    }
+
+    // clamp to finish if photoFinish disabled -> spread ends slightly
+    const target = elapsed / duration; // 0..1
+    for (const r of racers){
+      if ($('#photoFinish').checked){
+        r.progress = Math.min(r.progress, target * 1.02); // keep pack near the timeline
+      }
+      if (!r.finished && r.progress >= 1){ r.finished = true; r.finishTime = now; }
+      r.draw();
+    }
+
+    // If time is up or all finished, stop
+    const anyNotDone = racers.some(r => !r.finished);
+    if (elapsed >= duration || !anyNotDone){
+      running = false;
+      // Rank by progress then by earliest finishTime
+      const ranked = [...racers].sort((a,b)=> (b.progress - a.progress) || ((a.finishTime||Infinity) - (b.finishTime||Infinity)) );
+      const champ = ranked[0];
+      showWinner(champ, ranked);
+      confettiBurst();
+      return;
+    }
+
+    requestAnimationFrame(tick);
+  }
+
+  function showWinner(champ, ranked){
+    const box = $('#winner');
+    box.innerHTML = `🏆 Winner: <b style="color:${champ.m.color}">${champ.m.name}</b><br/><span class="hint">Order: ${ranked.map(r=>r.m.name).join('  •  ')}</span>`;
+    box.style.display = 'block';
+  }
+
+  // Minimal confetti
+  let confetti = [];
+  function confettiBurst(){
+    confetti = Array.from({length: 140}, () => ({
+      x: Math.random()*width, y: -20, vx: (Math.random()-0.5)*2*dpr, vy: (2+Math.random()*3)*dpr,
+      size: (3+Math.random()*4)*dpr, color: ['#ff5252','#ffd740','#69f0ae','#40c4ff','#b388ff'][Math.floor(Math.random()*5)],
+      life: 120 + Math.random()*60
+    }));
+    if (!winnerShown){ winnerShown = true; animateConfetti(); }
+  }
+  function animateConfetti(){
+    drawTrack(); racers.forEach(r=>r.draw());
+    confetti.forEach(p=>{
+      p.x += p.vx; p.y += p.vy; p.vy += 0.02*dpr; p.life -= 1;
+      ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, p.size, p.size);
+    });
+    confetti = confetti.filter(p=>p.life>0 && p.y < height+20);
+    if (confetti.length > 0) requestAnimationFrame(animateConfetti);
+  }
+
+  // Boot
+  initUI();
+  setupCanvas();
+</script>
+</body>
+</html>
