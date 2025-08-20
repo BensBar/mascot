@@ -5,46 +5,136 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Mascot Race</title>
   <style>
-    body { margin:0; background:#111; color:#fff; font-family:sans-serif; }
-    header { padding:10px; background:#222; display:flex; gap:10px; align-items:center; }
-    button { padding:8px 14px; border:none; border-radius:6px; cursor:pointer; }
-    button.primary { background:#e53935; color:#fff; }
+    :root {
+      --bg: #111;
+      --panel: #1b1d22;
+      --panel-2: #222;
+      --text: #fff;
+      --muted: #9aa4ad;
+      --accent: #e53935;
+      --lane: #444;
+      --finish: #888;
+      --canvas: #0c0e12;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    header {
+      padding:10px 12px;
+      background:var(--panel-2);
+      display:flex;
+      gap:12px;
+      align-items:center;
+      flex-wrap: wrap;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header .title { font-weight: 700; letter-spacing:.2px; }
+    button {
+      padding:8px 14px; border:none; border-radius:8px; cursor:pointer; background:#3a3f46; color:#fff;
+      transition: transform .02s ease, background .15s ease, opacity .15s ease;
+    }
+    button:hover { background:#4a5058; }
+    button:active { transform: translateY(1px); }
+    button.primary { background:var(--accent); color:#fff; }
+    button.primary:hover { filter: brightness(1.05); }
     button.secondary { background:#555; color:#fff; }
-    canvas { display:block; width:100%; height:80vh; background:#0c0e12; }
-    #winner { padding:10px; font-size:20px; font-weight:bold; text-align:center; }
+    button[disabled] { opacity:.6; cursor:not-allowed; }
+
+    .controls {
+      background: var(--panel);
+      border-top: 1px solid #2a2f36;
+      border-bottom: 1px solid #2a2f36;
+      padding: 12px;
+      display: grid;
+      gap: 12px;
+    }
+    .row {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .row .label { color: var(--muted); font-size: 14px; }
+    .durations button { min-width:64px }
+    .mascot-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 10px;
+    }
+    .mascot-card {
+      display:flex; align-items:center; gap:10px;
+      padding:8px; border:1px solid #2a2f36; border-radius:10px; background:#16181d;
+      cursor:pointer; user-select:none;
+    }
+    .mascot-card input { accent-color: var(--accent); width:18px; height:18px; }
+    .mascot-card img { width:36px; height:36px; object-fit:contain; background:#0f1115; border-radius:6px; }
+    .mascot-card .name { font-weight:600; font-size:14px; }
+    .mascot-card.selected { outline: 2px solid #2f333a; background:#171a20; }
+
+    canvas { display:block; width:100%; height:70vh; background:var(--canvas); }
+    #winner { padding:10px; font-size:18px; font-weight:600; text-align:center; min-height: 28px; }
   </style>
 </head>
 <body>
   <header>
-    <span>🏁 Mascot Race</span>
-    <button id="race30">30s</button>
-    <button id="race45" class="primary">45s</button>
-    <button id="race60">60s</button>
-    <button id="start" class="secondary">Start Race</button>
+    <span class="title">🏁 Mascot Race</span>
+    <div class="row durations" role="group" aria-label="Race duration">
+      <button id="race30" aria-pressed="false">30s</button>
+      <button id="race45" class="primary" aria-pressed="true">45s</button>
+      <button id="race60" aria-pressed="false">60s</button>
+    </div>
+    <div class="row">
+      <button id="start" class="secondary">Start Race</button>
+      <button id="reset" title="Reset to start positions">Reset</button>
+    </div>
   </header>
+
+  <section class="controls">
+    <div class="row">
+      <span class="label">Select mascots to race:</span>
+    </div>
+    <div id="mascotGrid" class="mascot-grid"></div>
+  </section>
+
   <canvas id="track"></canvas>
   <div id="winner"></div>
+
 <script>
-  const mascots = [
-    { id:"blooper",  name:"Blooper",   img:"assets/blooper.png",  color:"#e91e63" },
-    { id:"uga",      name:"Uga",       img:"assets/uga.png",      color:"#d32f2f" },
-    { id:"hairyhawk",name:"Hairy Hawk",img:"assets/hairyhawk.png",color:"#f44336" },
-    { id:"freddie",  name:"Freddie",   img:"assets/freddie.png",  color:"#ff7043" }
+  // Model
+  const allMascots = [
+    { id:"blooper",   name:"Blooper",    img:"assets/blooper.png",   color:"#e91e63" },
+    { id:"uga",       name:"Uga",        img:"assets/uga.png",       color:"#d32f2f" },
+    { id:"hairyhawk", name:"Hairy Hawk", img:"assets/hairyhawk.png", color:"#f44336" },
+    { id:"freddie",   name:"Freddie",    img:"assets/freddie.png",   color:"#ff7043" }
   ];
 
-  let duration = 45; // default
-  let canvas = document.getElementById('track');
-  let ctx = canvas.getContext('2d');
+  // Elements
+  const canvas = document.getElementById('track');
+  const ctx = canvas.getContext('2d');
+  const winnerEl = document.getElementById('winner');
+  const startBtn = document.getElementById('start');
+  const resetBtn = document.getElementById('reset');
+  const durationBtns = {
+    30: document.getElementById('race30'),
+    45: document.getElementById('race45'),
+    60: document.getElementById('race60'),
+  };
+  const mascotGrid = document.getElementById('mascotGrid');
+
+  // State
+  let duration = 45; // seconds
+  let selected = new Set(allMascots.map(m => m.id)); // all selected by default
   let racers = [];
   let running = false;
-  let startedAt;
+  let startedAt = 0;
+  let lastFrameAt = 0;
+  let rafId = 0;
 
+  // Utils
   function resize(){
     canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight * 0.8;
+    canvas.height = Math.max(320, Math.floor(window.innerHeight * 0.7));
+    if (!running) drawFrame();
   }
   window.addEventListener('resize', resize);
-  resize();
 
   class Racer {
     constructor(m, lane){
@@ -52,29 +142,53 @@
       this.lane = lane;
       this.img = new Image();
       this.img.src = m.img;
-      this.progress = 0;
-      this.base = 1 / duration * (0.95 + Math.random()*0.1);
+      this.progress = 0; // 0..1
+      this.base = speedForDuration(duration);
+      this.img.onload = () => { if (!running) drawFrame(); };
     }
+    resetProgress(){ this.progress = 0; }
+    reSeedSpeed(){ this.base = speedForDuration(duration); }
     step(dt){ this.progress += this.base * dt; }
     draw(){
-      const laneHeight = canvas.height / mascots.length;
+      const laneHeight = canvas.height / Math.max(1, racers.length);
       const y = this.lane*laneHeight + laneHeight/2 - 40;
-      const x = 80 + (canvas.width-160-80) * Math.min(this.progress,1);
+      const leftPad = 80, rightPad = 160;
+      const x = leftPad + (canvas.width - (leftPad + rightPad)) * Math.min(this.progress,1);
+      // shadow circle
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = "#000";
+      ctx.beginPath();
+      ctx.ellipse(x+40, y+72, 28, 10, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      // mascot
       ctx.drawImage(this.img, x, y, 80, 80);
+      // name plate
+      ctx.fillStyle = this.m.color;
+      ctx.font = "600 14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+      ctx.fillText(this.m.name, Math.max(8, x-70), y+18);
     }
   }
 
+  function speedForDuration(d){
+    // average speed to reach 1.0 in 'duration' seconds with small variance
+    return (1 / d) * (0.95 + Math.random()*0.1);
+  }
+
+  // Drawing
   function drawTrack(){
     ctx.fillStyle = '#0b0c10';
     ctx.fillRect(0,0,canvas.width,canvas.height);
-    const laneHeight = canvas.height / mascots.length;
-    for(let i=0;i<mascots.length;i++){
+    const lanes = Math.max(1, racers.length);
+    const laneHeight = canvas.height / lanes;
+    for(let i=0;i<=lanes;i++){
       ctx.strokeStyle = '#444';
       ctx.beginPath();
       ctx.moveTo(0, i*laneHeight);
       ctx.lineTo(canvas.width, i*laneHeight);
       ctx.stroke();
     }
+    // finish line
     ctx.strokeStyle = '#888';
     ctx.beginPath();
     ctx.moveTo(canvas.width-100, 0);
@@ -82,35 +196,141 @@
     ctx.stroke();
   }
 
-  function startRace(){
-    racers = mascots.map((m,i)=> new Racer(m,i));
-    startedAt = performance.now();
-    running = true;
-    requestAnimationFrame(tick);
+  function drawFrame(){
+    drawTrack();
+    racers.forEach(r => r.draw());
   }
 
-  function tick(){
-    if(!running) return;
+  // Race loop
+  function tick(now){
+    if (!running) return;
+    if (!lastFrameAt) lastFrameAt = now;
+    const dt = Math.min(0.05, (now - lastFrameAt) / 1000); // clamp to 50ms
+    lastFrameAt = now;
+
     drawTrack();
-    const now = performance.now();
-    const elapsed = (now - startedAt)/1000;
-    const dt = 1/60;
     racers.forEach(r => r.step(dt));
     racers.forEach(r => r.draw());
 
-    if(elapsed >= duration){
+    const elapsed = (now - startedAt) / 1000;
+    if (elapsed >= duration){
       running = false;
+      cancelAnimationFrame(rafId);
+      // sort and announce
       racers.sort((a,b)=> b.progress - a.progress);
-      document.getElementById('winner').textContent = `🏆 Winner: ${racers[0].m.name}`;
-    } else {
-      requestAnimationFrame(tick);
+      winnerEl.textContent = `🏆 Winner: ${racers[0].m.name}`;
+      setControlsEnabled(true);
+      drawFrame();
+      return;
+    }
+    rafId = requestAnimationFrame(tick);
+  }
+
+  // Controls
+  function setDurationUI(selectedDuration){
+    Object.entries(durationBtns).forEach(([d, btn]) => {
+      const isActive = Number(d) === selectedDuration;
+      btn.classList.toggle('primary', isActive);
+      btn.setAttribute('aria-pressed', String(isActive));
+    });
+  }
+
+  function setControlsEnabled(enabled){
+    startBtn.disabled = !enabled && true;
+    resetBtn.disabled = !enabled && true;
+    Object.values(durationBtns).forEach(b => b.disabled = !enabled && true);
+    // Disable mascot selection while running to keep lanes consistent
+    Array.from(mascotGrid.querySelectorAll('input[type="checkbox"]')).forEach(cb => cb.disabled = !enabled && true);
+  }
+
+  function buildMascotGrid(){
+    mascotGrid.innerHTML = "";
+    allMascots.forEach(m => {
+      const card = document.createElement('label');
+      card.className = 'mascot-card' + (selected.has(m.id) ? ' selected' : '');
+      card.style.borderColor = '#2a2f36';
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = selected.has(m.id);
+      cb.addEventListener('change', () => {
+        if (cb.checked) selected.add(m.id); else selected.delete(m.id);
+        card.classList.toggle('selected', cb.checked);
+        rebuildRacers();
+      });
+
+      const img = document.createElement('img');
+      img.alt = m.name;
+      img.src = m.img;
+
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = m.name;
+
+      card.appendChild(cb);
+      card.appendChild(img);
+      card.appendChild(name);
+      mascotGrid.appendChild(card);
+    });
+  }
+
+  function rebuildRacers(){
+    // Keep order as in allMascots but only selected ones
+    const active = allMascots.filter(m => selected.has(m.id));
+    racers = active.map((m,i)=> new Racer(m,i));
+    // Empty selection guard
+    startBtn.disabled = active.length === 0;
+    resetBtn.disabled = active.length === 0;
+    if (!running) {
+      winnerEl.textContent = active.length ? '' : 'Select at least one mascot to enable the race.';
+      drawFrame();
     }
   }
 
-  document.getElementById('race30').onclick=()=>{duration=30;};
-  document.getElementById('race45').onclick=()=>{duration=45;};
-  document.getElementById('race60').onclick=()=>{duration=60;};
-  document.getElementById('start').onclick=startRace;
+  function startRace(){
+    if (running) return;
+    if (racers.length === 0){
+      winnerEl.textContent = 'Select at least one mascot to start the race.';
+      return;
+    }
+    // Reset positions and (re)seed speeds with current duration
+    racers.forEach(r => { r.resetProgress(); r.reSeedSpeed(); });
+    startedAt = performance.now();
+    lastFrameAt = 0;
+    running = true;
+    winnerEl.textContent = '';
+    setControlsEnabled(false);
+    cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(tick);
+  }
+
+  function resetRace(){
+    running = false;
+    cancelAnimationFrame(rafId);
+    racers.forEach(r => r.resetProgress());
+    winnerEl.textContent = '';
+    setControlsEnabled(true);
+    drawFrame();
+  }
+
+  // Wire up duration buttons
+  durationBtns[30].onclick = () => { duration = 30; setDurationUI(30); if (!running) drawFrame(); };
+  durationBtns[45].onclick = () => { duration = 45; setDurationUI(45); if (!running) drawFrame(); };
+  durationBtns[60].onclick = () => { duration = 60; setDurationUI(60); if (!running) drawFrame(); };
+
+  // Wire up start/reset
+  startBtn.onclick = startRace;
+  resetBtn.onclick = resetRace;
+
+  // Init
+  function init(){
+    setDurationUI(duration);
+    buildMascotGrid();
+    resize();
+    rebuildRacers(); // creates racers and draws initial frame
+    winnerEl.textContent = '';
+  }
+  init();
 </script>
 </body>
 </html>
