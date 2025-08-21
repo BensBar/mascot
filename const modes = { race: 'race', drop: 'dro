@@ -1,0 +1,42 @@
+const modes = { race: 'race', drop: 'drop' };
+let mode = modes.race;
+
+// Mode base
+class BaseMode {
+  init() {}
+  reset() {}
+  update(dt) {}
+  draw() {}
+  onResize() {}
+  isFinished(elapsed) { return false; }
+  getResults() { return []; }
+}
+
+// RaceMode wraps existing behavior
+class RaceMode extends BaseMode { /* adapt current drawTrack/tick logic here */ }
+
+// DropMode implements parachute physics
+class DropMode extends BaseMode {
+  constructor() { super(); this.droppers = []; this.landed = []; this.targetX = 0; }
+  init(mascots) { /* seed positions, rng, set targetX = canvas.width / 2 */ }
+  update(dt) { /* integrate physics, set landed state */ }
+  draw() { /* sky, target, shadows, parachutes, mascots */ }
+  isFinished(elapsed) { return elapsed >= duration || this.droppers.every(d => d.landed); }
+  getResults() { /* compute winner per selected rule */ }
+}
+
+// Wiring
+let modeImpl = new RaceMode();
+function setMode(next) {
+  mode = next;
+  modeImpl = next === modes.race ? new RaceMode() : new DropMode();
+  modeImpl.init(racers.map(r => r.m));
+  drawFrame();
+}
+
+// In tick():
+// modeImpl.update(dt); modeImpl.draw(); if (modeImpl.isFinished(elapsed)) announce winner
+
+// Add UI toggle:
+// <div class="row"><button id="modeRace">Race</button><button id="modeDrop">Drop</button></div>
+// and hook setMode on click
