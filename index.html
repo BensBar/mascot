@@ -188,10 +188,29 @@
     runLoop: new Audio('assets/running_loop.wav'),
   };
   sfx.runLoop.loop = true;
+
+  // Background music
+  const bgm = new Audio('assets/BKMusic.wav');
+  bgm.loop = true;
+  bgm.volume = 0.35; // requested default
+
   let muted = false;
+  let bgmStarted = false;
+  function ensureBgMusic(){
+    if (bgmStarted) return;
+    try {
+      const p = bgm.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => { bgmStarted = true; }).catch(() => {/* try again on next gesture */});
+      } else {
+        bgmStarted = true;
+      }
+    } catch {}
+  }
   function applyMute(){
     sfx.countdown.muted = muted;
     sfx.runLoop.muted = muted;
+    bgm.muted = muted; // NEW: include bgm
     muteToggle.setAttribute('aria-pressed', String(muted));
     muteToggle.textContent = muted ? '🔇 Muted' : '🔊 Sound';
   }
@@ -746,13 +765,13 @@
   durationBtns[60].onclick = () => { duration = 60; onDurationChanged(); };
 
   // Wire up mode buttons
-  modeBtns.race.onclick = () => setMode(modes.race);
-  modeBtns.drop.onclick = () => setMode(modes.drop);
+  modeBtns.race.onclick = () => { ensureBgMusic(); setMode(modes.race); };
+  modeBtns.drop.onclick = () => { ensureBgMusic(); setMode(modes.drop); };
 
   // Wire up start/reset
-  startBtn.onclick = startRace;
-  resetBtn.onclick = resetRace;
-  muteToggle.onclick = () => { muted = !muted; applyMute(); };
+  startBtn.onclick = () => { ensureBgMusic(); startRace(); };
+  resetBtn.onclick = () => { ensureBgMusic(); resetRace(); };
+  muteToggle.onclick = () => { muted = !muted; applyMute(); ensureBgMusic(); };
   closeWinBtn.onclick = () => hideWinnerPopup();
   winModal.addEventListener('click', (e) => { if (e.target === winModal || e.target.classList.contains('modal-backdrop')) hideWinnerPopup(); });
 
@@ -767,6 +786,9 @@
   applyMute();
   }
   init();
+
+  // Add global listener for first user gesture to start BGM
+  window.addEventListener('pointerdown', ensureBgMusic, { once: true });
 </script>
 </body>
 </html>
