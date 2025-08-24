@@ -178,6 +178,7 @@
   let startedAt = 0;
   let lastFrameAt = 0;
   let rafId = 0;
+  let halfwayPlayed = false;
 
   // NEW: Drop-mode state (accelerate to terminal, then cruise; persists until Reset)
   let dropState = null; // { entities: [{r, x, y, vy, vt, a, landed, distance, targetT}] }
@@ -186,6 +187,7 @@
   const sfx = {
     countdown: new Audio('assets/count_down_3.wav'),
     runLoop: new Audio('assets/running_loop.wav'),
+    halfway: new Audio('assets/Halfway.mp3'),
   };
   sfx.runLoop.loop = true;
 
@@ -210,6 +212,7 @@
   function applyMute(){
     sfx.countdown.muted = muted;
     sfx.runLoop.muted = muted;
+    sfx.halfway.muted = muted;
     bgm.muted = muted; // NEW: include bgm
     muteToggle.setAttribute('aria-pressed', String(muted));
     muteToggle.textContent = muted ? '🔇 Muted' : '🔊 Sound';
@@ -222,7 +225,11 @@
     try { sfx.countdown.pause(); } catch {}
     try { sfx.countdown.currentTime = 0; } catch {}
   }
-  function stopAllSfx(){ stopCountdown(); stopRunLoop(); }
+  function stopHalfway(){
+    try { sfx.halfway.pause(); } catch {}
+    try { sfx.halfway.currentTime = 0; } catch {}
+  }
+  function stopAllSfx(){ stopCountdown(); stopRunLoop(); stopHalfway(); }
 
   // Winner helpers
   function showWinnerPopup(m){
@@ -570,6 +577,11 @@
     }
 
     const elapsed = (now - startedAt) / 1000;
+    // Check for halfway point in Race mode
+    if (mode === modes.race && !halfwayPlayed && elapsed >= duration / 2) {
+      halfwayPlayed = true;
+      try { sfx.halfway.currentTime = 0; sfx.halfway.play().catch(()=>{}); } catch {}
+    }
     // Only end by duration in Race mode
     if (mode === modes.race && elapsed >= duration){
       running = false;
@@ -717,6 +729,7 @@
 
     // Prepare racers but do not start ticking until countdown finishes
     racers.forEach(r => { r.resetProgress(); r.reSeedSpeed(); });
+    halfwayPlayed = false;
 
     // Helper to actually start the race and running loop
     const beginRun = () => {
@@ -755,6 +768,7 @@
     winnerEl.textContent = '';
     setControlsEnabled(true);
     dropState = null; // clear drop entities on reset
+    halfwayPlayed = false;
     stopAllSfx();
     drawFrame();      // refresh canvas now
   }
