@@ -304,24 +304,7 @@
   };
   sfx.runLoop.loop = true;
 
-  // Background music
-  const bgm = new Audio('assets/BKMusic.wav');
-  bgm.loop = true;
-  bgm.volume = 0.35; // requested default
-
   let muted = false;
-  let bgmStarted = false;
-  function ensureBgMusic(){
-    if (bgmStarted) return;
-    try {
-      const p = bgm.play();
-      if (p && typeof p.then === 'function') {
-        p.then(() => { bgmStarted = true; }).catch(() => {/* try again on next gesture */});
-      } else {
-        bgmStarted = true;
-      }
-    } catch {}
-  }
 
   // NEW: Race audio sequencing elements
   let bkmusicEl = null;
@@ -336,6 +319,9 @@
     if (!bkmusicEl) console.warn('Audio element with id "bkmusic" not found');
     if (!winEl) console.warn('Audio element with id "win" not found');
     if (!countdown3El) console.warn('Audio element with id "countdown3" not found');
+    
+    // Set volume on background music element
+    if (bkmusicEl) bkmusicEl.volume = 0.35;
   }
 
   function startBackgroundMusic() {
@@ -375,7 +361,6 @@
     sfx.countdown.muted = muted;
     sfx.runLoop.muted = muted;
     sfx.halfway.muted = muted;
-    bgm.muted = muted; // NEW: include bgm
     
     // NEW: include race audio sequencing elements
     if (bkmusicEl) bkmusicEl.muted = muted;
@@ -976,13 +961,13 @@
   durationBtns[60].onclick = () => { duration = 60; onDurationChanged(); };
 
   // Wire up mode buttons
-  modeBtns.race.onclick = () => { ensureBgMusic(); setMode(modes.race); };
-  modeBtns.drop.onclick = () => { ensureBgMusic(); setMode(modes.drop); };
+  modeBtns.race.onclick = () => { setMode(modes.race); };
+  modeBtns.drop.onclick = () => { setMode(modes.drop); };
 
   // Wire up start/reset
-  startBtn.onclick = () => { ensureBgMusic(); startRace(); };
-  resetBtn.onclick = () => { ensureBgMusic(); resetRace(); };
-  muteToggle.onclick = () => { muted = !muted; applyMute(); ensureBgMusic(); };
+  startBtn.onclick = () => { startRace(); };
+  resetBtn.onclick = () => { resetRace(); };
+  muteToggle.onclick = () => { muted = !muted; applyMute(); };
   closeWinBtn.onclick = () => hideWinnerPopup();
   winModal.addEventListener('click', (e) => { if (e.target === winModal || e.target.classList.contains('modal-backdrop')) hideWinnerPopup(); });
 
@@ -998,9 +983,6 @@
     initAudioElements(); // NEW: Initialize race audio sequencing elements
   }
   init();
-
-  // Add global listener for first user gesture to start BGM
-  window.addEventListener('pointerdown', ensureBgMusic, { once: true });
 </script>
 </body>
 </html>
