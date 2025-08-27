@@ -240,6 +240,11 @@
     </div>
   </div>
 
+  <!-- Audio elements for race sequencing -->
+  <audio id="countdown3" src="assets/count_down_3.wav" preload="auto"></audio>
+  <audio id="bkmusic" src="assets/BKMusic.wav" preload="auto" loop=""></audio>
+  <audio id="win" src="assets/Win.mp3" preload="auto"></audio>
+
 <script>
   // Model
   const allMascots = [
@@ -317,11 +322,66 @@
       }
     } catch {}
   }
+
+  // NEW: Race audio sequencing elements
+  let bkmusicEl = null;
+  let winEl = null;
+  let countdown3El = null;
+  
+  function initAudioElements() {
+    bkmusicEl = document.getElementById('bkmusic');
+    winEl = document.getElementById('win');
+    countdown3El = document.getElementById('countdown3');
+    
+    if (!bkmusicEl) console.warn('Audio element with id "bkmusic" not found');
+    if (!winEl) console.warn('Audio element with id "win" not found');
+    if (!countdown3El) console.warn('Audio element with id "countdown3" not found');
+  }
+
+  function startBackgroundMusic() {
+    if (!bkmusicEl) return;
+    try {
+      bkmusicEl.currentTime = 0;
+      bkmusicEl.play().catch(() => {
+        console.warn('Failed to play background music');
+      });
+    } catch (e) {
+      console.warn('Error starting background music:', e);
+    }
+  }
+
+  function stopBackgroundMusic() {
+    if (!bkmusicEl) return;
+    try {
+      bkmusicEl.pause();
+      bkmusicEl.currentTime = 0;
+    } catch (e) {
+      console.warn('Error stopping background music:', e);
+    }
+  }
+
+  function playWinSound() {
+    if (!winEl) return;
+    try {
+      winEl.currentTime = 0;
+      winEl.play().catch(() => {
+        console.warn('Failed to play win sound');
+      });
+    } catch (e) {
+      console.warn('Error playing win sound:', e);
+    }
+  }
   function applyMute(){
     sfx.countdown.muted = muted;
     sfx.runLoop.muted = muted;
     sfx.halfway.muted = muted;
     bgm.muted = muted; // NEW: include bgm
+    
+    // NEW: include race audio sequencing elements
+    if (bkmusicEl) bkmusicEl.muted = muted;
+    if (winEl) winEl.muted = muted;
+    if (countdown3El) countdown3El.muted = muted;
+    
     muteToggle.setAttribute('aria-pressed', String(muted));
     muteToggle.textContent = muted ? '🔇 Muted' : '🔊 Sound';
   }
@@ -337,10 +397,14 @@
     try { sfx.halfway.pause(); } catch {}
     try { sfx.halfway.currentTime = 0; } catch {}
   }
-  function stopAllSfx(){ stopCountdown(); stopRunLoop(); stopHalfway(); }
+  function stopAllSfx(){ stopCountdown(); stopRunLoop(); stopHalfway(); stopBackgroundMusic(); }
 
   // Winner helpers
   function showWinnerPopup(m){
+    // NEW: Stop background music and play win sound when winner is shown
+    stopBackgroundMusic();
+    playWinSound();
+    
     const still = m.still || m.img.replace('_run', '');
     winnerImgEl.src = still;
     winnerImgEl.alt = `${m.name} photo`;
@@ -853,17 +917,42 @@
     stopCountdown(); // reset to start
     let started = false;
     const safeStart = () => { if (started) return; started = true; beginRun(); };
-    const onEnded = () => { sfx.countdown.removeEventListener('ended', onEnded); safeStart(); };
-    sfx.countdown.addEventListener('ended', onEnded);
-    try {
-      const p = sfx.countdown.play();
-      if (p && typeof p.then === 'function') {
-        p.catch(() => { // autoplay or play failure fallback
-          setTimeout(safeStart, 500); // minimal delay if cannot play
-        });
+    
+    // NEW: Use countdown3 element and start background music when it ends
+    const onCountdown3Ended = () => { 
+      if (countdown3El) countdown3El.removeEventListener('ended', onCountdown3Ended);
+      startBackgroundMusic(); // Start background music immediately after countdown3 ends
+      safeStart(); 
+    };
+    
+    // Set up countdown3 audio element event listener
+    if (countdown3El) {
+      countdown3El.addEventListener('ended', onCountdown3Ended);
+      try {
+        countdown3El.currentTime = 0;
+        const p = countdown3El.play();
+        if (p && typeof p.then === 'function') {
+          p.catch(() => { // autoplay or play failure fallback
+            setTimeout(safeStart, 500); // minimal delay if cannot play
+          });
+        }
+      } catch {
+        setTimeout(safeStart, 500);
       }
-    } catch {
-      setTimeout(safeStart, 500);
+    } else {
+      // Fallback to original countdown if countdown3 element not found
+      const onEnded = () => { sfx.countdown.removeEventListener('ended', onEnded); safeStart(); };
+      sfx.countdown.addEventListener('ended', onEnded);
+      try {
+        const p = sfx.countdown.play();
+        if (p && typeof p.then === 'function') {
+          p.catch(() => { // autoplay or play failure fallback
+            setTimeout(safeStart, 500); // minimal delay if cannot play
+          });
+        }
+      } catch {
+        setTimeout(safeStart, 500);
+      }
     }
     // Absolute fallback in case 'ended' never fires
     setTimeout(safeStart, 6000);
@@ -905,7 +994,8 @@
     resize();
     rebuildRacers();
     winnerEl.textContent = '';
-  applyMute();
+    applyMute();
+    initAudioElements(); // NEW: Initialize race audio sequencing elements
   }
   init();
 
