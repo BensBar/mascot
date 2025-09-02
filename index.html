@@ -605,10 +605,10 @@
     ctx.fillStyle = '#1e232b';
     ctx.fillRect(0, canvas.height - L.groundH, canvas.width, L.groundH);
 
-    // Finish line pad (checkered) centered on ground
-    const padW = 80;
+    // Landing strip (checkered) spanning all parachuter zones
+    const padW = L.totalW;
     const tile = 10;
-    const padX = Math.round(canvas.width/2 - padW/2);
+    const padX = L.left;
     const padTop = canvas.height - L.groundH;
     for (let y = padTop; y < canvas.height; y += tile){
       for (let x = padX; x < padX + padW; x += tile){
@@ -651,45 +651,98 @@
   function drawDropEntities(){
     if (!dropState) return;
     const spriteW = 80, spriteH = 80;
+    const elapsed = (performance.now() - startedAt) / 1000;
+    
     for (const e of dropState.entities){
       const x = e.x;
       const y = e.y - 20; // keep canopy above head like placeholder
 
+      // Calculate canopy radius with optional inflation effect
+      let canopyRadius = 32;
+      if (e.deployed && e.deployTime !== undefined) {
+        const timeSinceDeploy = elapsed - e.deployTime;
+        const inflationDuration = 0.5; // 0.5s inflation time
+        if (timeSinceDeploy < inflationDuration) {
+          // Scale from 0.5 to 1.0 over inflation duration
+          const inflationProgress = timeSinceDeploy / inflationDuration;
+          const scale = 0.5 + 0.5 * Math.min(1, inflationProgress);
+          canopyRadius = 32 * scale;
+        }
+      } else if (elapsed < e.tDeploy) {
+        // Show smaller canopy during freefall (not yet deployed)
+        canopyRadius = 16;
+      }
+
       // parachute canopy
       ctx.fillStyle = e.r.m.color;
       ctx.beginPath();
-      ctx.arc(x + spriteW/2, y + 40, 32, Math.PI, 0);
+      ctx.arc(x + spriteW/2, y + 40, canopyRadius, Math.PI, 0);
       ctx.fill();
-      // lines
+      
+      // lines (adjust based on canopy size)
       ctx.strokeStyle = '#aaa';
       ctx.beginPath();
-      ctx.moveTo(x + 8,  y + 40); ctx.lineTo(x + 20, y + 52);
-      ctx.moveTo(x + 72, y + 40); ctx.lineTo(x + 60, y + 52);
+      const lineScale = canopyRadius / 32;
+      const leftX = x + spriteW/2 - canopyRadius * 0.75;
+      const rightX = x + spriteW/2 + canopyRadius * 0.75;
+      const mascotCenterX = x + spriteW/2;
+      ctx.moveTo(leftX, y + 40); ctx.lineTo(mascotCenterX - 12, y + 52);
+      ctx.moveTo(rightX, y + 40); ctx.lineTo(mascotCenterX + 12, y + 52);
       ctx.stroke();
+      
       // mascot
       ctx.drawImage(e.r.img, x, y + 20, spriteW, spriteH);
     }
   }
 
-  // Step physics for Drop mode (accelerate to terminal, then constant)
+  // Step physics for Drop mode (two-phase: freefall then canopy with sway)
   function stepDrop(dt, now){
     if (!dropState) return;
     const L = getDropLayout();
     const groundY = canvas.height - L.groundH - L.spriteH;
-    const targetX = canvas.width / 2;
+    const elapsed = (now - startedAt) / 1000;
 
     for (const e of dropState.entities){
       if (e.landed) continue;
-      // accelerate up to terminal speed
-      e.vy = Math.min(e.vt, e.vy + e.a * dt);
-      e.y += e.vy * dt;
+      
+      if (elapsed < e.tDeploy) {
+        // Freefall phase: gravity acceleration with tiny horizontal jitter
+        e.vy = Math.min(e.vtFree, e.vy + e.gFreefall * dt);
+        e.y += e.vy * dt;
+        
+        // Tiny horizontal jitter during freefall
+        const jitterAmount = 0.5;
+        e.x += (Math.random() - 0.5) * jitterAmount;
+        
+        // Clamp to zone bounds
+        e.x = Math.max(e.zoneLeft, Math.min(e.zoneRight, e.x));
+      } else {
+        // Canopy phase: ease toward canopy speed and add sway
+        if (!e.deployed) {
+          e.deployed = true;
+          e.deployTime = elapsed;
+        }
+        
+        // Smooth transition to canopy speed (floaty feel)
+        const easeRate = 3.0; // how quickly to approach canopy speed
+        e.vy += (e.vtCanopy - e.vy) * easeRate * dt;
+        e.y += e.vy * dt;
+        
+        // Sinusoidal sway during canopy phase
+        const swayTime = elapsed - e.deployTime;
+        const swayOffset = e.swayAmplitude * Math.sin(swayTime * e.swayFrequency * 2 * Math.PI + e.swayPhase);
+        e.x = e.centerX + swayOffset;
+        
+        // Clamp to zone bounds
+        e.x = Math.max(e.zoneLeft, Math.min(e.zoneRight, e.x));
+      }
 
       if (e.y >= groundY){
         e.y = groundY;
         e.landed = true;
-        e.distance = Math.abs((e.x + L.spriteW/2) - targetX);
-        // First to land wins immediately
-        if (!dropState.winner) dropState.winner = e;
+        // Calculate distance to landing strip center for precision landing
+        const stripCenterX = L.left + L.totalW / 2;
+        e.distance = Math.abs((e.x + L.spriteW/2) - stripCenterX);
       }
     }
   }
@@ -720,8 +773,16 @@
       stepDrop(dt, now);
       drawDropScene();
       drawDropEntities();
-      // End drop immediately when the first mascot lands
-      if (dropState && dropState.winner){
+      // Precision landing: wait for all to land, then pick closest to center
+      if (dropState && dropState.entities.every(e => e.landed)){
+        if (!dropState.winner) {
+          // Find the entity with the smallest distance to landing strip center
+          const winner = dropState.entities.reduce((best, current) => 
+            current.distance < best.distance ? current : best
+          );
+          dropState.winner = winner;
+        }
+        
         running = false;
         cancelAnimationFrame(rafId);
         const w = dropState.winner.r.m;
@@ -859,14 +920,42 @@
         const zoneX = L.left + i * L.zoneW;
         const x = Math.round(zoneX + (L.zoneW - spriteW)/2);
 
-        // randomized landing window and kinematics
-        const T_land = duration * (0.6 + Math.random() * 0.3);
-        const rFac = 0.65 + Math.random() * 0.2;
-        const vt = dist / (T_land * rFac);
-        const denom = Math.max(0.08, T_land - (dist / vt));
-        const a = Math.max(20, 0.5 * vt / denom);
-
-        entities.push({ r, x, y: topY, vy: 0, vt, a, landed: false, distance: null, targetT: T_land });
+        // Two-phase descent parameters
+        const tDeploy = 0.6 + Math.random() * 0.6; // randomized between 0.6-1.2s
+        const jitter = 0.97 + Math.random() * 0.06; // ±3% jitter
+        const T_land = Math.max(tDeploy + 0.6, duration * jitter);
+        
+        // Freefall phase parameters
+        const gFreefall = 1100; // px/s^2
+        const vtFree = 900; // px/s terminal velocity in freefall
+        
+        // Calculate approximate freefall distance (limited by terminal velocity)
+        const tFreefall = Math.min(tDeploy, vtFree / gFreefall);
+        const freefallDist = 0.5 * gFreefall * tFreefall * tFreefall + 
+                            Math.max(0, tDeploy - tFreefall) * vtFree;
+        
+        // Canopy phase: remaining distance and time
+        const canopyDist = Math.max(0, dist - freefallDist);
+        const tCanopy = Math.max(0.1, T_land - tDeploy);
+        const vtCanopy = canopyDist / tCanopy;
+        
+        // Sway parameters for canopy phase
+        const swayAmplitude = 10 + Math.random() * 20; // 10-30px sway
+        const swayFrequency = 0.5 + Math.random() * 1.0; // 0.5-1.5 Hz
+        const swayPhase = Math.random() * Math.PI * 2;
+        
+        entities.push({ 
+          r, x, y: topY, vy: 0, 
+          landed: false, distance: null, 
+          // Two-phase physics
+          tDeploy, gFreefall, vtFree, vtCanopy,
+          deployed: false, deployTime: 0,
+          // Sway parameters
+          swayAmplitude, swayFrequency, swayPhase,
+          centerX: x, // original center X for sway calculations
+          // Zone bounds for clamping
+          zoneLeft: zoneX, zoneRight: zoneX + L.zoneW - spriteW
+        });
       }
       dropState = { entities, winner: null };
 
