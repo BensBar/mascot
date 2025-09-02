@@ -743,6 +743,11 @@
         // Calculate distance to landing strip center for precision landing
         const stripCenterX = L.left + L.totalW / 2;
         e.distance = Math.abs((e.x + L.spriteW/2) - stripCenterX);
+        
+        // NEW: Set winner on first landing (first-to-land wins)
+        if (!dropState.winner) {
+          dropState.winner = e;
+        }
       }
     }
   }
@@ -773,16 +778,8 @@
       stepDrop(dt, now);
       drawDropScene();
       drawDropEntities();
-      // Precision landing: wait for all to land, then pick closest to center
-      if (dropState && dropState.entities.every(e => e.landed)){
-        if (!dropState.winner) {
-          // Find the entity with the smallest distance to landing strip center
-          const winner = dropState.entities.reduce((best, current) => 
-            current.distance < best.distance ? current : best
-          );
-          dropState.winner = winner;
-        }
-        
+      // NEW: End race immediately when first mascot lands (first-to-land wins)
+      if (dropState && dropState.winner){
         running = false;
         cancelAnimationFrame(rafId);
         const w = dropState.winner.r.m;
@@ -915,6 +912,10 @@
       const dist = Math.max(1, groundY - topY);
 
       const entities = [];
+      
+      // NEW: Choose one mascot to be the first to land at the target duration
+      const winnerIndex = Math.floor(Math.random() * L.n);
+      
       for (let i=0;i<L.n;i++){
         const r = racers[i];
         const zoneX = L.left + i * L.zoneW;
@@ -922,8 +923,18 @@
 
         // Two-phase descent parameters
         const tDeploy = 0.6 + Math.random() * 0.6; // randomized between 0.6-1.2s
-        const jitter = 0.97 + Math.random() * 0.06; // ±3% jitter
-        const T_land = Math.max(tDeploy + 0.6, duration * jitter);
+        
+        // NEW: Duration-aligned landing times
+        let T_land;
+        if (i === winnerIndex) {
+          // First to land: at approximately the selected duration (0-1% jitter)
+          const jitter = 1.0 + Math.random() * 0.01; // 0-1% jitter
+          T_land = Math.max(tDeploy + 0.6, duration * jitter);
+        } else {
+          // Others land 1-6% after duration to keep finish close
+          const jitter = 1.01 + Math.random() * 0.05; // 1-6% after duration
+          T_land = Math.max(tDeploy + 0.6, duration * jitter);
+        }
         
         // Freefall phase parameters
         const gFreefall = 1100; // px/s^2
