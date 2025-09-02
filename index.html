@@ -773,13 +773,11 @@
       stepDrop(dt, now);
       drawDropScene();
       drawDropEntities();
-      // Precision landing: wait for all to land, then pick closest to center
-      if (dropState && dropState.entities.every(e => e.landed)){
+      // First-to-land wins: end race when first mascot lands
+      if (dropState && dropState.entities.some(e => e.landed)){
         if (!dropState.winner) {
-          // Find the entity with the smallest distance to landing strip center
-          const winner = dropState.entities.reduce((best, current) => 
-            current.distance < best.distance ? current : best
-          );
+          // Find the first entity that landed
+          const winner = dropState.entities.find(e => e.landed);
           dropState.winner = winner;
         }
         
@@ -915,6 +913,9 @@
       const dist = Math.max(1, groundY - topY);
 
       const entities = [];
+      // Pick one mascot as earliest finisher for Medium spread
+      const earliestIndex = Math.floor(Math.random() * L.n);
+      
       for (let i=0;i<L.n;i++){
         const r = racers[i];
         const zoneX = L.left + i * L.zoneW;
@@ -922,7 +923,16 @@
 
         // Two-phase descent parameters
         const tDeploy = 0.6 + Math.random() * 0.6; // randomized between 0.6-1.2s
-        const jitter = 0.97 + Math.random() * 0.06; // ±3% jitter
+        
+        // Medium spread: earliest finisher vs others
+        let jitter;
+        if (i === earliestIndex) {
+          // Earliest finisher: 0-1% after duration
+          jitter = 1.00 + Math.random() * 0.01; // [1.00, 1.01]
+        } else {
+          // Others: 8-15% after duration
+          jitter = 1.08 + Math.random() * 0.07; // [1.08, 1.15]
+        }
         const T_land = Math.max(tDeploy + 0.6, duration * jitter);
         
         // Freefall phase parameters
