@@ -513,8 +513,9 @@
   }
 
   function speedForDuration(d){
-    // Faster for shorter durations, slower for longer
-    return (1 / d) * (0.95 + Math.random()*0.1);
+    // Significantly increased speed to compensate for timing issues
+    // Target: racers should finish around the selected duration including countdown
+    return (1 / d) * (2.0 + Math.random() * 0.4);
   }
 
   // NEW: Scale drop gravity/terminal based on duration (45s is baseline)
@@ -793,12 +794,31 @@
     }
 
     const elapsed = (now - startedAt) / 1000;
+    
+    // Check if any racer has finished (reached the finish line)
+    if (mode === modes.race) {
+      const finishedRacers = racers.filter(r => r.progress >= 1.0);
+      if (finishedRacers.length > 0) {
+        running = false;
+        cancelAnimationFrame(rafId);
+        // Winner is the first to finish, or if multiple finish in same frame, highest progress
+        finishedRacers.sort((a,b)=> b.progress - a.progress);
+        const w = finishedRacers[0].m;
+        winnerEl.textContent = `🏆 Winner: ${w.name}`;
+        showWinnerPopup(w);
+        stopRunLoop();
+        setControlsEnabled(true);
+        drawFrame();
+        return;
+      }
+    }
+    
     // Check for halfway point in Race mode
     if (mode === modes.race && !halfwayPlayed && elapsed >= duration / 2) {
       halfwayPlayed = true;
       try { sfx.halfway.currentTime = 0; sfx.halfway.play().catch(()=>{}); } catch {}
     }
-    // Only end by duration in Race mode
+    // Backup: end by duration in Race mode (in case no one finishes)
     if (mode === modes.race && elapsed >= duration){
       running = false;
       cancelAnimationFrame(rafId);
